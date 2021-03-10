@@ -3,7 +3,7 @@
 #
 # runs with Python 2.7
 #
-# known bugs: If OriginalFileName-Tag is not present in the DCP's PKL-file it will not work
+#
 #
 # written by Peter Ruhrmann / ruhrmann(at)hdm-stuttgart.de
 #
@@ -16,6 +16,7 @@ import tkFileDialog,tkMessageBox
 import base64
 import hashlib
 import xml.etree.ElementTree as ET
+import os
 
 namespaces = {'cpl': 'http://www.smpte-ra.org/schemas/429-7/2006/CPL', 'pkl': 'http://www.smpte-ra.org/schemas/429-8/2007/PKL', 'am': 'http://www.smpte-ra.org/schemas/429-9/2007/AM', 'dsig': 'http://www.w3.org/2000/09/xmldsig#'}
 ET.register_namespace('cpl', 'http://www.smpte-ra.org/schemas/429-7/2006/CPL') # needed to register the namespaces for CPL and PKL-files with multiple namespaces (e.g. signed files)
@@ -28,8 +29,8 @@ dirname = '.'
  
 master = Tk()
 master.title('DCP-Renamer')
-master.minsize(300,100)
-master.geometry('640x200')
+master.minsize(300,180)
+master.geometry('720x230')
 
  
 def readDCP():
@@ -53,8 +54,11 @@ def readDCP():
         
 def writeDCP():
     writeCPL(cplpath) # gets new Composition Title from comptitle entry, changes AnnotationText-Tag and ContentTitleText-Tag, and writes changed CPL-File
-    cplchecksum = calcHash(cplpath) # calculates new ahs for changed CPL-File
+    cplchecksum = calcHash(cplpath) # calculates new hash for changed CPL-File
     writePKL(pklpath, cplchecksum) # write new hash to PKL-File and changes AnnotationText-Tag
+    writeAM(dirname) # changes AnnotationText-Tag in ASSETMAP
+    if checkRD.get() == 1: # rename the directory containing the DCP if checkbox is checked
+        renameSourceDir(dirname)
     status.config(fg = 'dark green', text='DCP written')
     return
         
@@ -86,8 +90,19 @@ def getCPL(path):
         for asset in assetlist.findall('pkl:Asset',namespaces):
             filetype = asset.find('pkl:Type',namespaces)
             if filetype.text == 'text/xml':
-                cplfile = asset.find('pkl:OriginalFileName',namespaces)
-    return cplfile.text
+                cplid = asset.find('pkl:Id',namespaces) # gets CPL Id. Using OriginalFileName-Tag does not work for DCPs from DCP-O-Matic
+                # search the CPL Id in ASSETMAP.xml to get the CPL Path              
+                tree = ET.parse(dirname + '/ASSETMAP.xml')
+                root = tree.getroot()
+                for assetlist in root.findall('am:AssetList',namespaces):
+                    for asset in assetlist.findall('am:Asset',namespaces):
+                        assetid = asset.find('am:Id',namespaces)
+                        if assetid.text == cplid.text:
+                            for chunklist in asset.findall('am:ChunkList',namespaces):
+                                for chunk in chunklist.findall('am:Chunk',namespaces):
+                                    cplfile = chunk.find('am:Path',namespaces)
+                                    return cplfile.text
+    return
 
 
 def getCompTitle(path):
@@ -140,6 +155,29 @@ def writePKL(path, checksum):
                 annotext.text = comptitleentry.get()
     tree.write(path, encoding='utf-8', xml_declaration=True)
     return
+
+def writeAM(dirname):
+    ET.register_namespace('', 'http://www.smpte-ra.org/schemas/429-7/2006/AM') #default name space
+    try:
+        tree = ET.parse(dirname + '/ASSETMAP.xml')
+    except IOError:
+        status.config(fg = 'red', text='Don\'t know what to write. You must load a DCP first!')
+        mainloop()
+        
+    root = tree.getroot()
+    annotext = root.find('am:AnnotationText',namespaces)
+    annotext.text = comptitleentry.get()
+    try:
+        tree.write(dirname + '/ASSETMAP.xml', encoding='utf-8', xml_declaration=True)
+    except IOError:
+        status.config(fg = 'red', text='Cannot write to disk. Do you have the permission to write the file?')
+        mainloop()
+    return
+
+def renameSourceDir(dirname):
+    parent_path=os.path.dirname(dirname)
+    os.rename(dirname,os.path.join(parent_path,comptitleentry.get()))
+    return
     
 # def createDCNC():
 #    subwin = Toplevel()
@@ -165,19 +203,23 @@ readbutton.place(x = 20, y= 20)
 Label(master, justify=LEFT, text='Composition Title:').place(x = 20, y = 50)
 
 comptitleentry = Entry(master, width = 60)
-comptitleentry.place(x = 130, y = 50)
+comptitleentry.place(x = 150, y = 50)
 
 # dcncbutton = Button(master, text='Create DCDN-Name', command=createDCNC)
 # dcncbutton.place(x = 510, y = 46)
 
+checkRD = IntVar(value=1)
+checkrenamedir = Checkbutton(master, text="Rename directory containing the DCP", variable=checkRD)
+checkrenamedir.place(x = 20, y= 80)
+
 writebutton = Button(master, text='Write DCP', command=writeDCP)
-writebutton.place(x = 20, y = 80)
+writebutton.place(x = 20, y = 110)
 
 status = Label(master)
-status.place(x = 20, y = 110)
+status.place(x = 20, y = 140)
 
 author = Label(master, justify=LEFT, text='Written by Peter Ruhrmann. If this program is useful for you, write me a mail: ruhrmann@hdm-stuttgart.de')
-author.place(x = 20, y = 140)
+author.place(x = 20, y = 170)
 
 
 mainloop()
